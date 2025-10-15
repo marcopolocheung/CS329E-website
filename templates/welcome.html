@@ -1,3 +1,5 @@
+<!-- Source: https://www.w3schools.com/howto/howto_js_form_steps.asp -->
+
 <html>
 
 <head>
@@ -73,13 +75,14 @@ input.invalid {
 		<div class="row  mvh-100 flex-column flex-md-row">
         	<div class="col-md-2 div_left" style="height:90vh;background-color: lightblue;float:left; margin-top:-16px;">
 			<div class="row" id="newrun" style="{{regButton_style}}">
-				<button onclick="display_new_register_form()" style="margin-left:5px;margin-top:5px">Register City</button>
+				<button onclick="display_new_run_form()" style="margin-left:5px;margin-top:5px">Register City</button>
 			</div>
 			<div class="row" id="addCity" style="{{addButton_style}}">
 				<button onclick="display_add_city_form()" style="margin-left:5px;margin-top:5px">Add City</button>
 			</div>
 			<hr></hr>
           		<div class="row"> <!-- row2 -->
+			<!-- <a style="color:black;text-align:right;margin-left:5px;" id="run-parameters">Cities</a>-->
 			<div>
 			              <ul id="city_list">
                 			{% for city in cities %}
@@ -130,6 +133,7 @@ input.invalid {
 			<tr>
 				<td></td>
                 		<td>
+                  		<!-- Assignment1 TODO: Complete the data fields -->
                   		<input type="checkbox" name="max_temp" id="max_temp" value="max_temp">Max Temperature</input><br></br>
 				<input type="checkbox" name="min_temp" id="min_temp" value="min_temp">Min Temperature</input><br></br>
 				<input type="checkbox" name="precipitation" id="precipitation" value="precipitation">Precipitation</input><br></br>

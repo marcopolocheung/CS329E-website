@@ -1,4 +1,5 @@
 from flask import Flask, redirect, request, url_for
+from flask import Response
 
 import requests
 
@@ -21,7 +22,13 @@ app = Flask(__name__)
 app.secret_key = secrets.token_hex() 
 
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import Column, Integer, ForeignKey, String
+
 from logging.config import dictConfig
+
 
 dictConfig({
     'version': 1,
@@ -47,149 +54,254 @@ dictConfig({
     }
 })
 
-# [CityDetails(name:Austin, year:2023, month:08, params:[TMAX,TMIN], CityDetails(name:Dallas])
-# Filled by the Admin workflow
+# Not required for assignment3
 in_mem_cities = []
-
-# {username: [CityDetails(name:Austin, year:2023, month:08, params:[TMAX,TMIN], CityDetails(name:Dallas)]}
-# Filled by user workflow
 in_mem_user_cities = {}
 
 
-class CityDetails:
-    def __init__(self, name='', month='', year='', params=[]):
-        self.name = name
-        self.month = month
-        self.year = year
-        self.params = params
-    
-
-weather_parameters_to_track = ['TMAX','TMIN','PRCP','SNOW']
+# SQLite Database creation
+Base = declarative_base()
+engine = create_engine("sqlite:///weatherportal.db", echo=True, future=True)
+DBSession = sessionmaker(bind=engine)
 
 
-@app.route("/status", methods=['GET'])
-def city_status():
-    op = {}
-    app.logger.info("Inside city_status")
-    city_name = request.args.get('city').strip()
-    app.logger.info("City status:" + city_name)
-    
-    username = ''
-    if 'username' in session:
-        username = session['username']
+@app.before_first_request
+def create_tables():
+    Base.metadata.create_all(engine)
 
-    app.logger.info("Username:" + username + " City:" + city_name)
-    cities_to_check = []
-    if username in in_mem_user_cities:
-        cities_to_check = in_mem_user_cities[username]
+######
+#CITY#
+######
+class City(Base):
+    __tablename__ = 'cities'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String)
+    url = Column(String)
+    adminid = Column(Integer, ForeignKey('admin.id'))
+
+    def __repr__(self):
+        return "<City(name='%s')>" % (self.name)
+
+    def as_dict(self):
+        fields = {}
+        for c in self.__table__.columns:
+            fields[c.name] = getattr(self, c.name)
+        return fields
+
+#######
+#ADMIN#
+#######
+class Admin(Base):
+    __tablename__ = 'admin'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String)
+    password = Column(String)
+
+    def __repr__(self):
+        return "<Admin(name='%s')>" % (self.name)
+
+    # Ref: https://stackoverflow.com/questions/5022066/how-to-serialize-sqlalchemy-result-to-json
+    def as_dict(self):
+        fields = {}
+        for c in self.__table__.columns:
+            fields[c.name] = getattr(self, c.name)
+        return fields
+
+######
+#USER#
+######
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String)
+    password = Column(String)
+
+    def __repr__(self):
+        return "<User(name='%s')>" % (self.name)
+
+    def as_dict(self):
+        fields = {}
+        for c in self.__table__.columns:
+            fields[c.name] = getattr(self, c.name)
+        return fields
+
+class UserCity(Base):
+    __tablename__ = 'user_cities'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String)
+    url = Column(String)
+    userid = Column(Integer, ForeignKey('users.id'))
+    month = Column(String)
+    year = Column(String)
+    weather_params = Column(String)
+
+    def __repr__(self):
+        return "<UserCity(name='%s')>" % (self.name)
+
+    def as_dict(self):
+        fields = {}
+        for c in self.__table__.columns:
+            fields[c.name] = getattr(self, c.name)
+        return fields
+
+#############################################
+############### Admin REST API ##############
+#############################################
+@app.route("/admin", methods=['POST'])
+def add_admin():
+    app.logger.info("Inside add_admin")
+    data = request.json
+    app.logger.info("Received request:%s", str(data))
+
+    name = data['name']
+    password = data['password']
+
+    admin = Admin(name=name, password=password)
+
+    session = DBSession()
+    session.add(admin)
+    session.commit()
+
+    return admin.as_dict()
+
+
+@app.route("/admin")
+def get_admins():
+    app.logger.info("Inside get_admins")
+    ret_obj = {}
+
+    session = DBSession()
+    admins = session.query(Admin)
+    admin_list = []
+    for admin in admins:
+        admin_list.append(admin.as_dict())
+
+    ret_obj['admins'] = admin_list
+    return ret_obj
+
+
+@app.route("/admin/<id>")
+def get_admin_by_id(id):
+    app.logger.info("Inside get_admin_by_id %s\n", id)
+
+    session = DBSession()
+    admin = session.get(Admin, id)
+
+    app.logger.info("Found admin:%s\n", str(admin))
+    if admin == None:
+        status = ("Admin with id {id} not found\n").format(id=id)
+        return Response(status, status=404)
     else:
-        cities_to_check = in_mem_cities
+        return admin.as_dict()
 
-    city_details = None
-    for c in cities_to_check:
-        if c.name == city_name:
-            city_details = c
-            break
+@app.route("/admin/<id>", methods=['DELETE'])
+def delete_admin_by_id(id):
+    app.logger.info("Inside delete_admin_by_id %s\n", id)
 
-    op['name'] = city_details.name
-    
-########Assignment 2: Added month, year, params to op
-    op['month'] = city_details.month or ''
-    op['year'] = city_details.year or ''
-    op['params'] = city_details.params or []
-    
-    app.logger.info(op)
-    return json.dumps(op)
+    session = DBSession()
+    admin = session.query(Admin).filter_by(id=id).first()
 
-
-@app.route("/addcity", methods=['POST','GET'])
-def addcity():
-    app.logger.info("Inside addcity")
-    city_name = request.args.get('city_name').strip()
-    city = CityDetails(name=city_name)
-    in_mem_cities.append(city)
-
-    username = ''
-    if 'username' in session:
-        username = session['username']
-
-    user_cities = in_mem_cities
-    return render_template('welcome.html',
-            welcome_message = "Personal Weather Portal - Admin Panel",
-            status_string="Registered city " + city_name + ".",
-            cities=user_cities,
-            name=username,
-            addButton_style="display:inline;",
-            addCityForm_style="display:none;",
-            regButton_style="display:none;",
-            regForm_style="display:none;",
-            status_style="display:block;")
-
-
-@app.route("/registercity", methods=['POST','GET'])
-def registercity():
-    app.logger.info("Inside registercity")
-
-    username = ''
-    if 'username' in session:
-        username = session['username']
-
-    city_name = request.args.get('city_name').strip()
-
-########Assignment 2: parsed year and month
-    year = request.args.get('year', '').strip()
-    month = request.args.get('month', '').strip()
-    app.logger.info("City:" + city_name + " Year:" + year + " Month:" + month)
- 
-    user_weather_params = [] 
-    if 'max_temp' in request.args:
-        user_weather_params.append('TMAX')
-
-    ########Assignment 2: parsed and save min_temp, precipitation, snow
-    if 'min_temp' in request.args:
-        user_weather_params.append('TMIN')
-    if 'precipitation' in request.args:
-        user_weather_params.append('PRCP')
-    if 'snow' in request.args:
-        user_weather_params.append('SNOW')
-    app.logger.info(user_weather_params)
-
-
-    my_cities = []
-    if username in in_mem_user_cities:
-        my_cities = in_mem_user_cities[username]
-    for c in in_mem_cities:
-        if c.name == city_name:
-            city_details = CityDetails(name=city_name,year=year, month=month, params=user_weather_params)
-            my_cities.append(city_details)
-    in_mem_user_cities[username] = my_cities
-
-    present = False
-    for c in in_mem_cities:
-        if c.name == city_name:
-            present = True
-            break
-    if present:
-        return render_template('welcome.html',
-                welcome_message = "Personal Weather Portal",
-                cities=my_cities,
-                name=username,
-                status_string="Registered city " + city_name + ".",
-                addButton_style="display:none;",
-                addCityForm_style="display:none;",                
-                regForm_style="display:none;",
-                status_style="display:block;")
+    app.logger.info("Found admin:%s\n", str(admin))
+    if admin == None:
+        status = ("Admin with id {id} not found.\n").format(id=id)
+        return Response(status, status=404)
     else:
-        return render_template('welcome.html',
-                cities=my_cities,
-                welcome_message = "Personal Weather Portal",
-                name=username,
-                status_string="Weather data for " + city_name + " not available.",
-                addButton_style="display:none;",
-                addCityForm_style="display:none;",
-                regForm_style="display:none;",
-                status_style="display:block;")
+        session.delete(admin)
+        session.commit()
+        status = ("Admin with id {id} deleted.\n").format(id=id)
+        return Response(status, status=200)
 
+############
+#ADMIN CITY#
+############
+@app.route("/admin/<admin_id>/cities", methods=['POST'])
+def add_city(admin_id):
+    app.logger.info("Inside add_city for admin %s", admin_id)
+    
+    session = DBSession()
+    
+    admin = session.get(Admin, admin_id)
+    if admin == None:
+        status = f"Admin with id {admin_id} not found\n"
+        return Response(status, status=404)
+    
+    data = request.json
+    app.logger.info("Received request:%s", str(data))
+
+    name = data['name']
+    url = data['url']
+
+    city = City(name=name, url=url, adminid=admin_id)
+    session.add(city)
+    session.commit()
+
+    return city.as_dict()
+
+
+@app.route("/admin/<admin_id>/cities")
+def get_cities(admin_id):
+    app.logger.info("Inside get_cities for admin %s", admin_id)
+    
+    session = DBSession()
+    
+    admin = session.get(Admin, admin_id)
+    if admin == None:
+        status = f"Admin with id {admin_id} not found\n"
+        return Response(status, status=404)
+    
+    ret_obj = {}
+    cities = session.query(City).filter_by(adminid=admin_id)
+    city_list = []
+    for city in cities:
+        city_list.append(city.as_dict())
+
+    ret_obj['cities'] = city_list
+    return ret_obj
+
+
+@app.route("/admin/<admin_id>/cities/<city_id>")
+def get_city_by_id(admin_id, city_id):
+    app.logger.info("Inside get_city_by_id %s for admin %s\n", city_id, admin_id)
+
+    session = DBSession()
+    
+    admin = session.get(Admin, admin_id)
+    if admin == None:
+        status = f"Admin with id {admin_id} not found\n"
+        return Response(status, status=404)
+    
+    city = session.get(City, city_id)
+
+    app.logger.info("Found city:%s\n", str(city))
+    if city == None:
+        status = f"City with id {city_id} not found\n"
+        return Response(status, status=404)
+    else:
+        return city.as_dict()
+
+
+@app.route("/admin/<admin_id>/cities/<city_id>", methods=['DELETE'])
+def delete_city_by_id(admin_id, city_id):
+    app.logger.info("Inside delete_city_by_id %s for admin %s\n", city_id, admin_id)
+
+    session = DBSession()
+    
+    admin = session.get(Admin, admin_id)
+    if admin == None:
+        status = f"Admin with id {admin_id} not found.\n"
+        return Response(status, status=404)
+    
+    city = session.query(City).filter_by(id=city_id).first()
+
+    app.logger.info("Found city:%s\n", str(city))
+    if city == None:
+        status = f"City with id {city_id} not found.\n"
+        return Response(status, status=404)
+    else:
+        session.delete(city)
+        session.commit()
+        status = f"City with id {city_id} deleted.\n"
+        return Response(status, status=200)
 
 @app.route("/logout",methods=['GET'])
 def logout():
@@ -221,16 +333,13 @@ def login():
             regForm_style="display:inline;",
             status_style="display:none;")
 
-
 @app.route("/")
 def index():
     return render_template('index.html')
 
 
-########Assignment 2 /adminlogin path route
-
-@app.route("/adminlogin", methods=['POST'], endpoint='adminlogin')
-def login():
+@app.route("/adminlogin", methods=['POST'])
+def adminlogin():
     username = request.form['username'].strip()
     password = request.form['password'].strip()
     app.logger.info("Username:%s", username)
@@ -238,24 +347,155 @@ def login():
 
     session['username'] = username
 
-    my_cities = []
-    if username in in_mem_user_cities:
-        my_cities = in_mem_user_cities[username]
+    user_cities = in_mem_cities
     return render_template('welcome.html',
-            welcome_message = "Personal Weather Portal",
-            cities=in_mem_cities,
+            welcome_message = "Personal Weather Portal - Admin Panel",
+            cities=user_cities,
             name=username,
             addButton_style="display:inline;",
-            addCityForm_style="display:none;",
+            addCityForm_style="display:inline;",
             regButton_style="display:none;",
             regForm_style="display:none;",
             status_style="display:none;")
 
-########Assignment 2 /admin path route
 
 @app.route("/admin")
-def admin():
+def adminindex():
     return render_template('adminindex.html')
+
+#############################################
+############### User REST API ###############
+#############################################
+
+@app.route("/users", methods=['POST'])
+def add_user():
+    app.logger.info("Inside add_user")
+    data = request.json
+    app.logger.info("Received request:%s", str(data))
+
+    name = data['name']
+    password = data['password']
+
+    session = DBSession()
+    
+    existing_user = session.query(User).filter_by(name=name).first()
+    if existing_user:
+        status = f"User {name} already exists."
+        return Response(status, status=400)
+
+    user = User(name=name, password=password)
+    session.add(user)
+    session.commit()
+
+    return user.as_dict()
+
+
+@app.route("/users")
+def get_users():
+    app.logger.info("Inside get_users")
+    ret_obj = {}
+
+    session = DBSession()
+    users = session.query(User)
+    user_list = []
+    for user in users:
+        user_list.append(user.as_dict())
+
+    ret_obj['users'] = user_list
+    return ret_obj
+
+
+@app.route("/users/<id>")
+def get_user_by_id(id):
+    app.logger.info("Inside get_user_by_id %s\n", id)
+
+    session = DBSession()
+    user = session.get(User, id)
+
+    app.logger.info("Found user:%s\n", str(user))
+    if user == None:
+        status = f"User with id {id} not found\n"
+        return Response(status, status=404)
+    else:
+        return user.as_dict()
+
+
+@app.route("/users/<id>", methods=['DELETE'])
+def delete_user_by_id(id):
+    app.logger.info("Inside delete_user_by_id %s\n", id)
+
+    session = DBSession()
+    user = session.query(User).filter_by(id=id).first()
+
+    app.logger.info("Found user:%s\n", str(user))
+    if user == None:
+        status = f"User with id {id} not found.\n"
+        return Response(status, status=404)
+    else:
+        session.delete(user)
+        session.commit()
+        status = f"User with id {id} deleted.\n"
+        return Response(status, status=200)
+
+@app.route("/users/<user_id>/cities", methods=['POST'])
+def add_user_city(user_id):
+    app.logger.info("Inside add_user_city for user %s", user_id)
+    
+    session = DBSession()
+    
+    user = session.get(User, user_id)
+    if user == None:
+        status = f"User with id {user_id} not found\n"
+        return Response(status, status=404)
+    
+    data = request.json
+    app.logger.info("Received request:%s", str(data))
+
+    name = data['name']
+    
+    admin_city = session.query(City).filter_by(name=name).first()
+    if admin_city == None:
+        status = f"City with name {name} not found.\n"
+        return Response(status, status=404)
+    
+    city = UserCity(name=name, userid=user_id)
+    for key, value in data.items():
+        if key != 'name' and hasattr(UserCity, key):
+            setattr(city, key, value)
+    
+    session.add(city)
+    session.commit()
+
+    return city.as_dict()
+
+
+@app.route("/users/<user_id>/cities")
+def get_user_cities(user_id):
+    app.logger.info("Inside get_user_cities for user %s", user_id)
+    
+    session = DBSession()
+    
+    user = session.get(User, user_id)
+    if user == None:
+        status = f"User with id {user_id} not found\n"
+        return Response(status, status=404)
+    
+    name = request.args.get('name')
+    if name:
+        city = session.query(UserCity).filter_by(userid=user_id, name=name).first()
+        if city == None:
+            status = f"City with name {name} not found.\n"
+            return Response(status, status=404)
+        return city.as_dict()
+    
+    ret_obj = {}
+    cities = session.query(UserCity).filter_by(userid=user_id)
+    city_list = []
+    for city in cities:
+        city_list.append(city.as_dict())
+
+    ret_obj['cities'] = city_list
+    return ret_obj
 
 if __name__ == "__main__":
 
