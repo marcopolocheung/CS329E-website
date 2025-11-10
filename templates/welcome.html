@@ -86,14 +86,14 @@ input.invalid {
 			<div>
 			              <ul id="city_list">
                 			{% for city in cities %}
-					 <li><a onclick="get_city_status(this)" id={{city.name}} href="#" style="text-decoration:underline"> {{ city.name }}</a> </li>
+					 <li><a onclick="get_city_weather_graphs(this)" id={{city.name}} href="#" style="text-decoration:underline"> {{ city.name }}</a> </li>
                 			{% endfor %}
               				</ul>
 			</div>
           		</div> <!-- row2 -->
 		</div>
 
-		<div class="col-md-10 flex-grow-1 div_right" id="entity-form-container">
+		<div class="col-md-8 flex-grow-1 div_right" id="entity-form-container">
 
 			<div id="status" style="{{status_style}}">
 				<div id="status_string">{{status_string}}</div>
@@ -148,6 +148,23 @@ input.invalid {
 		</form>
 		</div>
 		</div>
+		
+		<div class="col-md-2 flex-grow-1 div_right" id="entity-form-container" style="height:90vh;background-color: lightblue;float:left; margin-top:-16px;">
+                        <div class="row"> <!-- row2 -->
+			<h3>Available cities:</h3>
+			<!-- Assignment 4 Add ordered list for cities -->
+							<div>
+								<ol>
+									{% for city in available_cities %}
+										<li>{{ city.name }}</li>
+									{% endfor %}
+								</ol>
+							</div>
+                        </div> <!-- row2 -->
+
+		</div>
+
+
 		</div>
 
 
